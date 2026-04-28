@@ -4,15 +4,11 @@ pipeline {
     environment {
         COMPOSE_PROJECT_NAME = 'assignment27'
         MONGO_URL = 'mongodb://mongo:27017/relationship_db'
-        DOCKER_COMPOSE_CMD = isUnix() ? 'docker-compose' : 'docker-compose.exe'
-        CURL_CMD = isUnix() ? 'curl' : 'curl.exe'
-        NULL_OUTPUT = isUnix() ? '/dev/null' : 'nul'
     }
 
     options {
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        ansiColor('xterm')
         skipDefaultCheckout()
     }
 
@@ -43,16 +39,24 @@ pipeline {
                 echo '========================================='
                 echo "Deployment Environment: ${params.DEPLOY_ENV}"
                 echo "Run Tests: ${params.RUN_TESTS}"
-                echo "OS Type: ${isUnix() ? 'Linux/Unix' : 'Windows'}"
                 
                 script {
+                    // Detect OS and set commands
+                    if (isUnix()) {
+                        env.DOCKER_COMPOSE_CMD = 'docker-compose'
+                        env.CURL_CMD = 'curl'
+                        env.NULL_OUTPUT = '/dev/null'
+                    } else {
+                        env.DOCKER_COMPOSE_CMD = 'docker-compose.exe'
+                        env.CURL_CMD = 'curl.exe'
+                        env.NULL_OUTPUT = 'nul'
+                    }
+                    
                     // Set environment-specific variables
                     if (params.DEPLOY_ENV == 'production') {
                         env.NODE_ENV = 'production'
-                        env.PORT = '5000'
                     } else {
                         env.NODE_ENV = 'development'
-                        env.PORT = '5000'
                     }
                 }
             }
@@ -64,8 +68,13 @@ pipeline {
                 checkout scm
                 
                 script {
-                    env.GIT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-                    env.GIT_BRANCH = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+                    if (isUnix()) {
+                        env.GIT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                        env.GIT_BRANCH = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+                    } else {
+                        env.GIT_COMMIT = bat(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                        env.GIT_BRANCH = bat(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+                    }
                     echo "Git Commit: ${env.GIT_COMMIT}"
                     echo "Git Branch: ${env.GIT_BRANCH}"
                 }
@@ -78,10 +87,13 @@ pipeline {
                     steps {
                         echo 'Checking Docker installation...'
                         script {
-                            def dockerVersion = isUnix() ? 
-                                sh(script: 'docker --version', returnStdout: true) : 
-                                bat(script: 'docker --version', returnStdout: true)
-                            echo "Docker Version: ${dockerVersion.trim()}"
+                            if (isUnix()) {
+                                def dockerVersion = sh(script: 'docker --version', returnStdout: true)
+                                echo "Docker Version: ${dockerVersion.trim()}"
+                            } else {
+                                def dockerVersion = bat(script: 'docker --version', returnStdout: true)
+                                echo "Docker Version: ${dockerVersion.trim()}"
+                            }
                         }
                     }
                 }
@@ -90,28 +102,12 @@ pipeline {
                     steps {
                         echo 'Checking Docker Compose installation...'
                         script {
-                            def composeVersion = isUnix() ? 
-                                sh(script: 'docker-compose --version', returnStdout: true) : 
-                                bat(script: 'docker-compose --version', returnStdout: true)
-                            echo "Docker Compose Version: ${composeVersion.trim()}"
-                        }
-                    }
-                }
-                
-                stage('Check Port Availability') {
-                    steps {
-                        echo 'Checking required ports...'
-                        script {
-                            def ports = ['5000', '5173', '27017']
-                            ports.each { port ->
-                                def portCheck = isUnix() ?
-                                    sh(script: "netstat -tuln | grep :${port} || true", returnStdout: true) :
-                                    bat(script: "netstat -an | findstr :${port}", returnStdout: true)
-                                if (portCheck.trim()) {
-                                    echo "Warning: Port ${port} is already in use"
-                                } else {
-                                    echo "Port ${port} is available"
-                                }
+                            if (isUnix()) {
+                                def composeVersion = sh(script: 'docker-compose --version', returnStdout: true)
+                                echo "Docker Compose Version: ${composeVersion.trim()}"
+                            } else {
+                                def composeVersion = bat(script: 'docker-compose --version', returnStdout: true)
+                                echo "Docker Compose Version: ${composeVersion.trim()}"
                             }
                         }
                     }
@@ -123,19 +119,17 @@ pipeline {
             steps {
                 echo 'Cleaning up old containers and images...'
                 script {
-                    def cleanCmd = """
-                        ${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} down --remove-orphans
-                        ${params.CLEAN_VOLUMES ? '-v' : ''}
-                    """.trim()
+                    def cleanCmd = "${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} down --remove-orphans"
+                    if (params.CLEAN_VOLUMES) {
+                        cleanCmd = cleanCmd + " -v"
+                    }
                     
                     if (isUnix()) {
                         sh "${cleanCmd} || true"
                         sh 'docker system prune -f || true'
-                        sh 'docker volume prune -f || true'
                     } else {
                         bat "${cleanCmd} || exit 0"
                         bat 'docker system prune -f || exit 0'
-                        bat 'docker volume prune -f || exit 0'
                     }
                 }
             }
@@ -242,9 +236,12 @@ pipeline {
                             
                             for (int i = 1; i <= maxAttempts; i++) {
                                 try {
-                                    def statusCode = isUnix() ?
-                                        sh(script: "curl -s -o ${env.NULL_OUTPUT} -w \"%{http_code}\" http://localhost:5000/persons", returnStdout: true).trim() :
-                                        bat(script: "curl -s -o ${env.NULL_OUTPUT} -w \"%%{http_code}\" http://localhost:5000/persons", returnStdout: true).trim()
+                                    def statusCode
+                                    if (isUnix()) {
+                                        statusCode = sh(script: "${env.CURL_CMD} -s -o ${env.NULL_OUTPUT} -w \"%{http_code}\" http://localhost:5000/persons", returnStdout: true).trim()
+                                    } else {
+                                        statusCode = bat(script: "${env.CURL_CMD} -s -o ${env.NULL_OUTPUT} -w \"%%{http_code}\" http://localhost:5000/persons", returnStdout: true).trim()
+                                    }
                                     
                                     if (statusCode == '200') {
                                         echo 'Backend API is healthy!'
@@ -252,7 +249,7 @@ pipeline {
                                         break
                                     }
                                 } catch (Exception e) {
-                                    echo "Attempt ${i}/${maxAttempts}: Backend not ready (Status: ${e.message})"
+                                    echo "Attempt ${i}/${maxAttempts}: Backend not ready"
                                 }
                                 sleep 5
                             }
@@ -271,9 +268,12 @@ pipeline {
                             
                             for (int i = 1; i <= maxAttempts; i++) {
                                 try {
-                                    def statusCode = isUnix() ?
-                                        sh(script: "curl -s -o ${env.NULL_OUTPUT} -w \"%{http_code}\" http://localhost:5173", returnStdout: true).trim() :
-                                        bat(script: "curl -s -o ${env.NULL_OUTPUT} -w \"%%{http_code}\" http://localhost:5173", returnStdout: true).trim()
+                                    def statusCode
+                                    if (isUnix()) {
+                                        statusCode = sh(script: "${env.CURL_CMD} -s -o ${env.NULL_OUTPUT} -w \"%{http_code}\" http://localhost:5173", returnStdout: true).trim()
+                                    } else {
+                                        statusCode = bat(script: "${env.CURL_CMD} -s -o ${env.NULL_OUTPUT} -w \"%%{http_code}\" http://localhost:5173", returnStdout: true).trim()
+                                    }
                                     
                                     if (statusCode == '200') {
                                         echo 'Frontend is healthy!'
@@ -303,37 +303,32 @@ pipeline {
                     // Test One-to-One: Person & Passport
                     echo 'Testing One-to-One Relationship (Person & Passport)...'
                     try {
-                        def createPerson = isUnix() ?
-                            sh(script: '''curl -X POST http://localhost:5000/persons \
+                        if (isUnix()) {
+                            sh '''curl -X POST http://localhost:5000/persons \
                                 -H "Content-Type: application/json" \
-                                -d '{"name":"Jenkins Test Person"}' ''', returnStdout: true) :
-                            bat(script: '''curl -X POST http://localhost:5000/persons \
+                                -d '{"name":"Jenkins Test Person"}' '''
+                            
+                            sh '''curl -X POST http://localhost:5000/customers \
                                 -H "Content-Type: application/json" \
-                                -d "{\\"name\\":\\"Jenkins Test Person\\"}" ''', returnStdout: true)
-                        echo "Create Person: ${createPerson}"
-                        
-                        // Test One-to-Many: Customer & Orders
-                        echo 'Testing One-to-Many Relationship (Customer & Orders)...'
-                        def createCustomer = isUnix() ?
-                            sh(script: '''curl -X POST http://localhost:5000/customers \
+                                -d '{"name":"Jenkins Customer"}' '''
+                            
+                            sh '''curl -X POST http://localhost:5000/actors \
                                 -H "Content-Type: application/json" \
-                                -d '{"name":"Jenkins Customer"}' ''', returnStdout: true) :
-                            bat(script: '''curl -X POST http://localhost:5000/customers \
+                                -d '{"name":"Jenkins Actor"}' '''
+                        } else {
+                            bat '''curl -X POST http://localhost:5000/persons \
                                 -H "Content-Type: application/json" \
-                                -d "{\\"name\\":\\"Jenkins Customer\\"}" ''', returnStdout: true)
-                        echo "Create Customer: ${createCustomer}"
-                        
-                        // Test Many-to-Many: Actors & Movies
-                        echo 'Testing Many-to-Many Relationship (Actors & Movies)...'
-                        def createActor = isUnix() ?
-                            sh(script: '''curl -X POST http://localhost:5000/actors \
+                                -d "{\\"name\\":\\"Jenkins Test Person\\"}" '''
+                            
+                            bat '''curl -X POST http://localhost:5000/customers \
                                 -H "Content-Type: application/json" \
-                                -d '{"name":"Jenkins Actor"}' ''', returnStdout: true) :
-                            bat(script: '''curl -X POST http://localhost:5000/actors \
+                                -d "{\\"name\\":\\"Jenkins Customer\\"}" '''
+                            
+                            bat '''curl -X POST http://localhost:5000/actors \
                                 -H "Content-Type: application/json" \
-                                -d "{\\"name\\":\\"Jenkins Actor\\"}" ''', returnStdout: true)
-                        echo "Create Actor: ${createActor}"
-                        
+                                -d "{\\"name\\":\\"Jenkins Actor\\"}" '''
+                        }
+                        echo 'Relationship tests completed successfully!'
                     } catch (Exception e) {
                         echo "Test failed: ${e.message}"
                         error "Relationship tests failed"
@@ -350,10 +345,8 @@ pipeline {
                 script {
                     if (isUnix()) {
                         sh "${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} ps"
-                        sh 'docker stats --no-stream'
                     } else {
                         bat "${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} ps"
-                        bat 'docker stats --no-stream'
                     }
                 }
             }
@@ -363,9 +356,9 @@ pipeline {
     post {
         success {
             echo '========================================='
-            echo '✅ PIPELINE SUCCESSFUL - Assignment 27'
+            echo '✓ PIPELINE SUCCESSFUL - Assignment 27'
             echo '========================================='
-            echo 'Deployment Information:'
+            echo "Deployment Information:"
             echo "  • Environment: ${params.DEPLOY_ENV}"
             echo "  • Git Commit: ${env.GIT_COMMIT}"
             echo "  • Git Branch: ${env.GIT_BRANCH}"
@@ -374,15 +367,12 @@ pipeline {
             echo '  • Frontend: http://localhost:5173'
             echo '  • Backend API: http://localhost:5000'
             echo '  • MongoDB: mongodb://localhost:27017'
-            echo '  • API Documentation: http://localhost:5000/api-docs'
             echo ''
             echo 'Useful Commands:'
             echo '  • View logs: docker-compose -p assignment27 logs -f'
             echo '  • Stop all: docker-compose -p assignment27 down'
-            echo '  • Rebuild: docker-compose -p assignment27 up -d --build'
             echo '========================================='
             
-            // Archive container logs
             script {
                 if (isUnix()) {
                     sh 'docker-compose -p assignment27 logs > assignment27-logs.txt || true'
@@ -395,7 +385,7 @@ pipeline {
         
         failure {
             echo '========================================='
-            echo 'PIPELINE FAILED - Assignment 27'
+            echo '✗ PIPELINE FAILED - Assignment 27'
             echo '========================================='
             echo 'Collecting debug information...'
             
@@ -416,28 +406,13 @@ pipeline {
             echo '2. Verify Docker daemon is running'
             echo '3. Check Docker Compose file syntax'
             echo '4. Review backend/frontend Dockerfiles'
-            echo '5. Ensure all required files exist'
             echo '========================================='
-        }
-        
-        unstable {
-            echo 'PIPELINE UNSTABLE - Some tests failed but deployment succeeded'
         }
         
         always {
             echo '========================================='
             echo "Pipeline completed at: ${new Date()}"
-            echo "Total duration: ${currentBuild.durationString}"
             echo '========================================='
-            
-            // Cleanup old images (keep last 5)
-            script {
-                if (isUnix()) {
-                    sh 'docker image prune -f --filter "until=24h" || true'
-                } else {
-                    bat 'docker image prune -f --filter "until=24h" || exit 0'
-                }
-            }
         }
     }
 }
