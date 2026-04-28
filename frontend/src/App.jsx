@@ -38,6 +38,20 @@ function App() {
     actors: [],
   });
 
+  const [showDashboard, setShowDashboard] = useState(false);
+  const [stats, setStats] = useState({
+    totalPersons: 0,
+    personsWithPassport: 0,
+    totalCustomers: 0,
+    totalOrders: 0,
+    totalAuthors: 0,
+    totalBooks: 0,
+    totalActors: 0,
+    totalMovies: 0,
+    topCustomer: null,
+    mostBookedAuthor: null,
+  });
+
   useEffect(() => {
     fetchPersons();
     fetchCustomers();
@@ -45,6 +59,58 @@ function App() {
     fetchActors();
     fetchMovies();
   }, []);
+
+  useEffect(() => {
+    if (persons.length || customers.length || authors.length || actors.length) {
+      calculateStats();
+    }
+  }, [persons, customers, authors, actors, movies]);
+
+  const calculateStats = () => {
+    const totalOrders = customers.reduce(
+      (sum, c) => sum + (c.orders?.length || 0),
+      0,
+    );
+    const totalBooks = authors.reduce(
+      (sum, a) => sum + (a.books?.length || 0),
+      0,
+    );
+
+    const personsWithPassport = persons.filter((p) => p.passport).length;
+
+    let topCustomer = null;
+    let maxOrders = 0;
+    customers.forEach((customer) => {
+      const orderCount = customer.orders?.length || 0;
+      if (orderCount > maxOrders) {
+        maxOrders = orderCount;
+        topCustomer = customer;
+      }
+    });
+
+    let mostBookedAuthor = null;
+    let maxBooks = 0;
+    authors.forEach((author) => {
+      const bookCount = author.books?.length || 0;
+      if (bookCount > maxBooks) {
+        maxBooks = bookCount;
+        mostBookedAuthor = author;
+      }
+    });
+
+    setStats({
+      totalPersons: persons.length,
+      personsWithPassport,
+      totalCustomers: customers.length,
+      totalOrders,
+      totalAuthors: authors.length,
+      totalBooks,
+      totalActors: actors.length,
+      totalMovies: movies.length,
+      topCustomer,
+      mostBookedAuthor,
+    });
+  };
 
   const handleGlobalSearch = (term) => {
     setSearchTerm(term);
@@ -299,6 +365,87 @@ function App() {
   return (
     <div style={styles.container}>
       <h1 style={styles.title}>Database Relationships Showcase</h1>
+
+      <div style={styles.headerControls}>
+        <button
+          onClick={() => setShowDashboard(!showDashboard)}
+          style={styles.dashboardButton}
+        >
+          {showDashboard ? "Hide Dashboard" : "Show Dashboard"}
+        </button>
+      </div>
+
+      {showDashboard && (
+        <div style={styles.dashboard}>
+          <h2 style={styles.dashboardTitle}>Database Statistics Dashboard</h2>
+
+          <div style={styles.statsGrid}>
+            <div style={styles.statCard}>
+              <h3>Persons</h3>
+              <p style={styles.statNumber}>{stats.totalPersons}</p>
+              <p>With Passport: {stats.personsWithPassport}</p>
+              <p>
+                Without Passport:{" "}
+                {stats.totalPersons - stats.personsWithPassport}
+              </p>
+            </div>
+
+            <div style={styles.statCard}>
+              <h3>Customers & Orders</h3>
+              <p style={styles.statNumber}>{stats.totalCustomers}</p>
+              <p>Total Customers</p>
+              <p style={styles.statNumber}>{stats.totalOrders}</p>
+              <p>Total Orders</p>
+              <p>
+                Avg Orders/Customer:{" "}
+                {(stats.totalOrders / stats.totalCustomers || 0).toFixed(1)}
+              </p>
+            </div>
+
+            <div style={styles.statCard}>
+              <h3>Authors & Books</h3>
+              <p style={styles.statNumber}>{stats.totalAuthors}</p>
+              <p>Total Authors</p>
+              <p style={styles.statNumber}>{stats.totalBooks}</p>
+              <p>Total Books</p>
+              <p>
+                Avg Books/Author:{" "}
+                {(stats.totalBooks / stats.totalAuthors || 0).toFixed(1)}
+              </p>
+            </div>
+
+            <div style={styles.statCard}>
+              <h3>Actors & Movies</h3>
+              <p style={styles.statNumber}>{stats.totalActors}</p>
+              <p>Total Actors</p>
+              <p style={styles.statNumber}>{stats.totalMovies}</p>
+              <p>Total Movies</p>
+            </div>
+          </div>
+
+          <div style={styles.statsRow}>
+            {stats.topCustomer && (
+              <div style={styles.highlightCard}>
+                <h3>Top Customer</h3>
+                <p>
+                  <strong>{stats.topCustomer.name}</strong>
+                </p>
+                <p>{stats.topCustomer.orders?.length || 0} orders placed</p>
+              </div>
+            )}
+
+            {stats.mostBookedAuthor && (
+              <div style={styles.highlightCard}>
+                <h3>Most Prolific Author</h3>
+                <p>
+                  <strong>{stats.mostBookedAuthor.name}</strong>
+                </p>
+                <p>{stats.mostBookedAuthor.books?.length || 0} books written</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div style={styles.searchContainer}>
         <input
@@ -824,6 +971,60 @@ const styles = {
     overflowY: "auto",
     zIndex: 1000,
     boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
+  },
+  headerControls: {
+    textAlign: "right",
+    marginBottom: "20px",
+  },
+  dashboardButton: {
+    padding: "10px 20px",
+    backgroundColor: "#ff6b6b",
+    color: "white",
+    border: "none",
+    borderRadius: "5px",
+    cursor: "pointer",
+    fontSize: "14px",
+  },
+  dashboard: {
+    background: "white",
+    borderRadius: "8px",
+    padding: "20px",
+    marginBottom: "30px",
+  },
+  dashboardTitle: {
+    marginTop: 0,
+    color: "teal",
+  },
+  statsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+    gap: "20px",
+    marginBottom: "20px",
+  },
+  statCard: {
+    background: "#f5f5f5",
+    padding: "15px",
+    borderRadius: "8px",
+    textAlign: "center",
+  },
+  statNumber: {
+    fontSize: "32px",
+    fontWeight: "bold",
+    margin: "10px 0",
+    color: "teal",
+  },
+  statsRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+    gap: "20px",
+    marginTop: "20px",
+  },
+  highlightCard: {
+    background: "linear-gradient(135deg, teal, darkteal)",
+    color: "white",
+    padding: "15px",
+    borderRadius: "8px",
+    textAlign: "center",
   },
 };
 
