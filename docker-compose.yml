@@ -1,35 +1,80 @@
-version: "3.8"
+version: '3.8'
 
 services:
-
+  # MongoDB Database (No password)
   mongo:
-    image: mongo
-    container_name: mongodb_container
+    image: mongo:6
+    container_name: relationship_db
+    restart: unless-stopped
     ports:
       - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: relationship_db
     volumes:
-      - mongo-data:/data/db
-    restart: unless-stopped
+      - mongo_data:/data/db
+    networks:
+      - app-network
 
+  # Backend API
   backend:
     build: ./backend
-    container_name: backend_container
+    container_name: assignment27_backend
+    restart: unless-stopped
     ports:
       - "5000:5000"
+    environment:
+      NODE_ENV: development
+      MONGO_URL: mongodb://mongo:27017/relationship_db
+      PORT: 5000
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
     depends_on:
       - mongo
-    environment:
-      - MONGO_URL=mongodb://mongo:27017/studentdb
-    restart: unless-stopped
+    networks:
+      - app-network
 
+  # Frontend
   frontend:
     build: ./frontend
-    container_name: frontend_container
+    container_name: assignment27_frontend
+    restart: unless-stopped
     ports:
       - "5173:5173"
+    environment:
+      NODE_ENV: development
+      VITE_API_URL: http://localhost:5000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     depends_on:
       - backend
+    networks:
+      - app-network
+
+  # Jenkins CI/CD Server
+  jenkins:
+    image: jenkins/jenkins:lts
+    container_name: assignment27_jenkins
     restart: unless-stopped
+    ports:
+      - "8080:8080"  # Jenkins web interface
+      - "50000:50000" # Jenkins agent port
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock  # Allow Jenkins to run Docker commands
+      - ./:/workspace  # Mount project directory
+    environment:
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
 
 volumes:
-  mongo-data:
+  mongo_data:
+    driver: local
+  jenkins_home:
+    driver: local
