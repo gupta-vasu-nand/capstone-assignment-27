@@ -82,4 +82,28 @@ router.put('/:customerId/orders/:orderId', async (req, res) => {
     }
 });
 
+// Delete specific order
+router.delete('/:customerId/orders/:orderId', async (req, res) => {
+    try {
+        const { customerId, orderId } = req.params;
+
+        const customer = await Customer.findById(customerId);
+        if (!customer) {
+            return res.status(404).json({ error: 'Customer not found' });
+        }
+
+        const orderIndex = customer.orders.findIndex(order => order._id.toString() === orderId);
+        if (orderIndex === -1) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+
+        customer.orders.splice(orderIndex, 1);
+        await customer.save();
+
+        res.json({ message: 'Order deleted successfully', customer });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
 module.exports = router;

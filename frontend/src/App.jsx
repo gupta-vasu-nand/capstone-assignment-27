@@ -130,6 +130,28 @@ function App() {
     }
   };
 
+  const handleDeleteOrder = async (customerId, orderId) => {
+    if (
+      !window.confirm(
+        "Are you sure you want to delete this order? This action cannot be undone.",
+      )
+    ) {
+      return;
+    }
+
+    try {
+      // Note: You'll need to add this DELETE endpoint in backend
+      await axios.delete(
+        `http://localhost:5000/customers/${customerId}/orders/${orderId}`,
+      );
+      await fetchCustomers();
+      alert("Order deleted successfully");
+    } catch (error) {
+      console.error("Error deleting order:", error);
+      alert("Failed to delete order");
+    }
+  };
+
   // Many-to-One: Books & Author (view from books perspective)
   const fetchAuthors = async () => {
     try {
@@ -365,6 +387,14 @@ function App() {
                           <option value="shipped">Shipped</option>
                           <option value="delivered">Delivered</option>
                         </select>
+                        <button
+                          onClick={() =>
+                            handleDeleteOrder(customer._id, order._id)
+                          }
+                          style={styles.deleteButton}
+                        >
+                          Delete
+                        </button>
                         {updatingOrderId === order._id && (
                           <span style={styles.loading}>Updating...</span>
                         )}
@@ -643,6 +673,16 @@ const styles = {
   loading: {
     fontSize: "12px",
     color: "#666",
+    marginLeft: "10px",
+  },
+  deleteButton: {
+    padding: "4px 10px",
+    backgroundColor: "#dc3545",
+    color: "white",
+    border: "none",
+    borderRadius: "4px",
+    cursor: "pointer",
+    fontSize: "12px",
     marginLeft: "10px",
   },
 };
