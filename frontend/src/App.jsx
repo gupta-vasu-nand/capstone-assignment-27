@@ -30,6 +30,14 @@ function App() {
   const [selectedActorId, setSelectedActorId] = useState("");
   const [selectedMovieId, setSelectedMovieId] = useState("");
 
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState({
+    persons: [],
+    customers: [],
+    authors: [],
+    actors: [],
+  });
+
   useEffect(() => {
     fetchPersons();
     fetchCustomers();
@@ -37,6 +45,25 @@ function App() {
     fetchActors();
     fetchMovies();
   }, []);
+
+  const handleGlobalSearch = (term) => {
+    setSearchTerm(term);
+    if (!term.trim()) {
+      setSearchResults({ persons: [], customers: [], authors: [], actors: [] });
+      return;
+    }
+
+    const lowerTerm = term.toLowerCase();
+
+    setSearchResults({
+      persons: persons.filter((p) => p.name.toLowerCase().includes(lowerTerm)),
+      customers: customers.filter((c) =>
+        c.name.toLowerCase().includes(lowerTerm),
+      ),
+      authors: authors.filter((a) => a.name.toLowerCase().includes(lowerTerm)),
+      actors: actors.filter((a) => a.name.toLowerCase().includes(lowerTerm)),
+    });
+  };
 
   // One-to-One: Person & Passport
   const fetchPersons = async () => {
@@ -272,6 +299,62 @@ function App() {
   return (
     <div style={styles.container}>
       <h1 style={styles.title}>Database Relationships Showcase</h1>
+
+      <div style={styles.searchContainer}>
+        <input
+          type="text"
+          placeholder="Search persons, customers, authors, or actors..."
+          value={searchTerm}
+          onChange={(e) => handleGlobalSearch(e.target.value)}
+          style={styles.searchInput}
+        />
+        {searchTerm && (
+          <div style={styles.searchResults}>
+            <h3>Search Results for "{searchTerm}"</h3>
+
+            {searchResults.persons.length > 0 && (
+              <div>
+                <h4>Persons ({searchResults.persons.length})</h4>
+                {searchResults.persons.map((p) => (
+                  <div key={p._id}>• {p.name}</div>
+                ))}
+              </div>
+            )}
+
+            {searchResults.customers.length > 0 && (
+              <div>
+                <h4>Customers ({searchResults.customers.length})</h4>
+                {searchResults.customers.map((c) => (
+                  <div key={c._id}>• {c.name}</div>
+                ))}
+              </div>
+            )}
+
+            {searchResults.authors.length > 0 && (
+              <div>
+                <h4>Authors ({searchResults.authors.length})</h4>
+                {searchResults.authors.map((a) => (
+                  <div key={a._id}>• {a.name}</div>
+                ))}
+              </div>
+            )}
+
+            {searchResults.actors.length > 0 && (
+              <div>
+                <h4>Actors ({searchResults.actors.length})</h4>
+                {searchResults.actors.map((a) => (
+                  <div key={a._id}>• {a.name}</div>
+                ))}
+              </div>
+            )}
+
+            {searchResults.persons.length === 0 &&
+              searchResults.customers.length === 0 &&
+              searchResults.authors.length === 0 &&
+              searchResults.actors.length === 0 && <div>No results found</div>}
+          </div>
+        )}
+      </div>
 
       {/* One-to-One: Person & Passport */}
       <div style={styles.card}>
@@ -713,6 +796,34 @@ const styles = {
     cursor: "pointer",
     fontSize: "12px",
     marginLeft: "10px",
+  },
+  searchContainer: {
+    marginBottom: "20px",
+    position: "relative",
+  },
+  searchInput: {
+    width: "100%",
+    padding: "12px",
+    fontSize: "16px",
+    borderRadius: "8px",
+    border: "2px solid teal",
+    outline: "none",
+    boxSizing: "border-box",
+  },
+  searchResults: {
+    position: "absolute",
+    top: "100%",
+    left: 0,
+    right: 0,
+    background: "white",
+    border: "1px solid #ccc",
+    borderRadius: "8px",
+    padding: "15px",
+    marginTop: "5px",
+    maxHeight: "400px",
+    overflowY: "auto",
+    zIndex: 1000,
+    boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
   },
 };
 
