@@ -14,6 +14,7 @@ function App() {
   const [customerName, setCustomerName] = useState("");
   const [orderItem, setOrderItem] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [updatingOrderId, setUpdatingOrderId] = useState(null);
 
   // Many-to-One: Books & Author (inverse of One-to-Many)
   const [authors, setAuthors] = useState([]);
@@ -110,6 +111,22 @@ function App() {
       fetchCustomers();
     } catch (error) {
       console.error("Error adding order:", error);
+    }
+  };
+
+  const handleUpdateOrderStatus = async (customerId, orderId, newStatus) => {
+    try {
+      setUpdatingOrderId(orderId);
+      await axios.put(
+        `http://localhost:5000/customers/${customerId}/orders/${orderId}`,
+        { status: newStatus },
+      );
+      await fetchCustomers();
+    } catch (error) {
+      console.error("Error updating order status:", error);
+      alert("Failed to update order status");
+    } finally {
+      setUpdatingOrderId(null);
     }
   };
 
@@ -330,7 +347,28 @@ function App() {
                 <ul style={styles.list}>
                   {customer.orders && customer.orders.length > 0 ? (
                     customer.orders.map((order) => (
-                      <li key={order._id}>{order.item}</li>
+                      <li key={order._id} style={styles.orderItem}>
+                        <span>{order.item}</span>
+                        <select
+                          value={order.status || "pending"}
+                          onChange={(e) =>
+                            handleUpdateOrderStatus(
+                              customer._id,
+                              order._id,
+                              e.target.value,
+                            )
+                          }
+                          style={styles.statusSelect}
+                          disabled={updatingOrderId === order._id}
+                        >
+                          <option value="pending">Pending</option>
+                          <option value="shipped">Shipped</option>
+                          <option value="delivered">Delivered</option>
+                        </select>
+                        {updatingOrderId === order._id && (
+                          <span style={styles.loading}>Updating...</span>
+                        )}
+                      </li>
                     ))
                   ) : (
                     <li>No orders yet</li>
@@ -588,6 +626,24 @@ const styles = {
   list: {
     margin: "5px 0",
     paddingLeft: "20px",
+  },
+  orderItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "5px 0",
+  },
+  statusSelect: {
+    padding: "4px 8px",
+    borderRadius: "4px",
+    border: "1px solid #ccc",
+    fontSize: "12px",
+    marginLeft: "10px",
+  },
+  loading: {
+    fontSize: "12px",
+    color: "#666",
+    marginLeft: "10px",
   },
 };
 
