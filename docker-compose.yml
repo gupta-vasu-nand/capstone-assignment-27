@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+
+  mongo:
+    image: mongo
+    container_name: mongodb_container
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: backend_container
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mongo
+    environment:
+      - MONGO_URL=mongodb://mongo:27017/studentdb
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: frontend_container
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
