@@ -4,137 +4,357 @@ pipeline {
     environment {
         COMPOSE_PROJECT_NAME = 'assignment27'
         MONGO_URL = 'mongodb://mongo:27017/relationship_db'
+        DOCKER_COMPOSE_CMD = isUnix() ? 'docker-compose' : 'docker-compose.exe'
+        CURL_CMD = isUnix() ? 'curl' : 'curl.exe'
+        NULL_OUTPUT = isUnix() ? '/dev/null' : 'nul'
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        ansiColor('xterm')
+        skipDefaultCheckout()
+    }
+
+    parameters {
+        choice(
+            name: 'DEPLOY_ENV',
+            choices: ['development', 'staging', 'production'],
+            description: 'Deployment environment'
+        )
+        booleanParam(
+            name: 'RUN_TESTS',
+            defaultValue: true,
+            description: 'Run API tests after deployment'
+        )
+        booleanParam(
+            name: 'CLEAN_VOLUMES',
+            defaultValue: false,
+            description: 'Remove volumes during cleanup'
+        )
     }
 
     stages {
 
-        stage('Checkout') {
+        stage('Initialize') {
             steps {
                 echo '========================================='
-                echo 'Cloning repository for Assignment 27...'
+                echo 'Assignment 27 - Database Relationships Demo'
                 echo '========================================='
+                echo "Deployment Environment: ${params.DEPLOY_ENV}"
+                echo "Run Tests: ${params.RUN_TESTS}"
+                echo "OS Type: ${isUnix() ? 'Linux/Unix' : 'Windows'}"
+                
+                script {
+                    // Set environment-specific variables
+                    if (params.DEPLOY_ENV == 'production') {
+                        env.NODE_ENV = 'production'
+                        env.PORT = '5000'
+                    } else {
+                        env.NODE_ENV = 'development'
+                        env.PORT = '5000'
+                    }
+                }
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                echo 'Cloning repository for Assignment 27...'
                 checkout scm
+                
+                script {
+                    env.GIT_COMMIT = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                    env.GIT_BRANCH = sh(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
+                    echo "Git Commit: ${env.GIT_COMMIT}"
+                    echo "Git Branch: ${env.GIT_BRANCH}"
+                }
+            }
+        }
+
+        stage('Environment Validation') {
+            parallel {
+                stage('Check Docker') {
+                    steps {
+                        echo 'Checking Docker installation...'
+                        script {
+                            def dockerVersion = isUnix() ? 
+                                sh(script: 'docker --version', returnStdout: true) : 
+                                bat(script: 'docker --version', returnStdout: true)
+                            echo "Docker Version: ${dockerVersion.trim()}"
+                        }
+                    }
+                }
+                
+                stage('Check Docker Compose') {
+                    steps {
+                        echo 'Checking Docker Compose installation...'
+                        script {
+                            def composeVersion = isUnix() ? 
+                                sh(script: 'docker-compose --version', returnStdout: true) : 
+                                bat(script: 'docker-compose --version', returnStdout: true)
+                            echo "Docker Compose Version: ${composeVersion.trim()}"
+                        }
+                    }
+                }
+                
+                stage('Check Port Availability') {
+                    steps {
+                        echo 'Checking required ports...'
+                        script {
+                            def ports = ['5000', '5173', '27017']
+                            ports.each { port ->
+                                def portCheck = isUnix() ?
+                                    sh(script: "netstat -tuln | grep :${port} || true", returnStdout: true) :
+                                    bat(script: "netstat -an | findstr :${port}", returnStdout: true)
+                                if (portCheck.trim()) {
+                                    echo "Warning: Port ${port} is already in use"
+                                } else {
+                                    echo "Port ${port} is available"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
         stage('Clean Environment') {
             steps {
-                echo 'Cleaning up old containers...'
+                echo 'Cleaning up old containers and images...'
                 script {
-                    bat 'docker-compose -p assignment27 down --remove-orphans -v || exit 0'
-                    bat 'docker system prune -f || exit 0'
+                    def cleanCmd = """
+                        ${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} down --remove-orphans
+                        ${params.CLEAN_VOLUMES ? '-v' : ''}
+                    """.trim()
+                    
+                    if (isUnix()) {
+                        sh "${cleanCmd} || true"
+                        sh 'docker system prune -f || true'
+                        sh 'docker volume prune -f || true'
+                    } else {
+                        bat "${cleanCmd} || exit 0"
+                        bat 'docker system prune -f || exit 0'
+                        bat 'docker volume prune -f || exit 0'
+                    }
                 }
             }
         }
 
-        stage('Build Docker Images') {
-            steps {
-                echo 'Building Docker images for backend and frontend...'
-                dir('backend') {
-                    bat 'docker build -t assignment27-backend:latest .'
+        stage('Build') {
+            parallel {
+                stage('Build Backend') {
+                    steps {
+                        echo 'Building backend Docker image...'
+                        script {
+                            dir('backend') {
+                                if (isUnix()) {
+                                    sh """
+                                        docker build -t assignment27-backend:${env.GIT_COMMIT} .
+                                        docker tag assignment27-backend:${env.GIT_COMMIT} assignment27-backend:latest
+                                    """
+                                } else {
+                                    bat """
+                                        docker build -t assignment27-backend:${env.GIT_COMMIT} .
+                                        docker tag assignment27-backend:${env.GIT_COMMIT} assignment27-backend:latest
+                                    """
+                                }
+                            }
+                        }
+                    }
                 }
-                dir('frontend') {
-                    bat 'docker build -t assignment27-frontend:latest .'
+                
+                stage('Build Frontend') {
+                    steps {
+                        echo 'Building frontend Docker image...'
+                        script {
+                            dir('frontend') {
+                                if (isUnix()) {
+                                    sh """
+                                        docker build -t assignment27-frontend:${env.GIT_COMMIT} .
+                                        docker tag assignment27-frontend:${env.GIT_COMMIT} assignment27-frontend:latest
+                                    """
+                                } else {
+                                    bat """
+                                        docker build -t assignment27-frontend:${env.GIT_COMMIT} .
+                                        docker tag assignment27-frontend:${env.GIT_COMMIT} assignment27-frontend:latest
+                                    """
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        stage('Start All Containers') {
+        stage('Deploy') {
             steps {
                 echo 'Starting containers with Docker Compose...'
-                bat 'docker-compose -p assignment27 up -d --build'
-                
-                echo 'Waiting for containers to initialize...'
-                sleep time: 15, unit: 'SECONDS'
-            }
-        }
-
-        stage('Verify Database') {
-            steps {
-                echo 'Checking MongoDB connection...'
                 script {
-                    def maxAttempts = 10
-                    for (int i = 1; i <= maxAttempts; i++) {
-                        try {
-                            def result = bat(script: 'docker exec relationship_db mongosh --eval "db.version()" --quiet', returnStdout: true)
-                            echo "MongoDB is ready: ${result.trim()}"
-                            break
-                        } catch (Exception e) {
-                            echo "Attempt ${i}/${maxAttempts}: Waiting for MongoDB..."
-                            sleep 5
-                        }
+                    def deployCmd = "${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} up -d --build"
+                    if (isUnix()) {
+                        sh deployCmd
+                    } else {
+                        bat deployCmd
                     }
-                }
-            }
-        }
-
-        stage('Verify Backend') {
-            steps {
-                echo 'Checking backend API health...'
-                script {
-                    def maxAttempts = 15
-                    for (int i = 1; i <= maxAttempts; i++) {
-                        try {
-                            def statusCode = bat(script: 'curl -s -o nul -w "%%{http_code}" http://localhost:5000/persons', returnStdout: true).trim()
-                            if (statusCode == '200') {
-                                echo 'Backend API is responding correctly!'
-                                break
-                            }
-                        } catch (Exception e) {
-                            echo "Attempt ${i}/${maxAttempts}: Waiting for backend..."
-                            sleep 5
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Verify Frontend') {
-            steps {
-                echo 'Checking frontend application...'
-                script {
-                    def maxAttempts = 15
-                    for (int i = 1; i <= maxAttempts; i++) {
-                        try {
-                            def statusCode = bat(script: 'curl -s -o nul -w "%%{http_code}" http://localhost:5173', returnStdout: true).trim()
-                            if (statusCode == '200') {
-                                echo 'Frontend application is running!'
-                                break
-                            }
-                        } catch (Exception e) {
-                            echo "Attempt ${i}/${maxAttempts}: Waiting for frontend..."
-                            sleep 5
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Show Container Status') {
-            steps {
-                echo 'Current container status:'
-                bat 'docker-compose -p assignment27 ps'
-                echo ''
-                echo 'Container logs (last 20 lines):'
-                bat 'docker-compose -p assignment27 logs --tail=20'
-            }
-        }
-
-        stage('Run Relationship Tests') {
-            steps {
-                echo 'Testing database relationships...'
-                script {
-                    // Test creating a person with passport (One-to-One)
-                    def createPerson = bat(script: '''
-                        curl -X POST http://localhost:5000/persons -H "Content-Type: application/json" -d "{\"name\":\"Jenkins Test User\"}"
-                    ''', returnStdout: true)
-                    echo "Create person response: ${createPerson}"
                     
-                    // Test creating a customer with order (One-to-Many)
-                    def createCustomer = bat(script: '''
-                        curl -X POST http://localhost:5000/customers -H "Content-Type: application/json" -d "{\"name\":\"Jenkins Customer\"}"
-                    ''', returnStdout: true)
-                    echo "Create customer response: ${createCustomer}"
+                    echo 'Waiting for containers to initialize...'
+                    sleep time: 15, unit: 'SECONDS'
+                }
+            }
+        }
+
+        stage('Health Checks') {
+            parallel {
+                stage('Database Health') {
+                    steps {
+                        echo 'Checking MongoDB connection...'
+                        script {
+                            def maxAttempts = 12
+                            def ready = false
+                            
+                            for (int i = 1; i <= maxAttempts; i++) {
+                                try {
+                                    def result = isUnix() ?
+                                        sh(script: "docker exec ${env.COMPOSE_PROJECT_NAME}_db mongosh --eval \"db.version()\" --quiet", returnStdout: true) :
+                                        bat(script: "docker exec ${env.COMPOSE_PROJECT_NAME}_db mongosh --eval \"db.version()\" --quiet", returnStdout: true)
+                                    
+                                    echo "MongoDB is ready: ${result.trim()}"
+                                    ready = true
+                                    break
+                                } catch (Exception e) {
+                                    echo "Attempt ${i}/${maxAttempts}: Waiting for MongoDB..."
+                                    sleep 5
+                                }
+                            }
+                            
+                            if (!ready) error "MongoDB failed to start"
+                        }
+                    }
+                }
+                
+                stage('Backend Health') {
+                    steps {
+                        echo 'Checking backend API health...'
+                        script {
+                            def maxAttempts = 20
+                            def ready = false
+                            
+                            for (int i = 1; i <= maxAttempts; i++) {
+                                try {
+                                    def statusCode = isUnix() ?
+                                        sh(script: "curl -s -o ${env.NULL_OUTPUT} -w \"%{http_code}\" http://localhost:5000/persons", returnStdout: true).trim() :
+                                        bat(script: "curl -s -o ${env.NULL_OUTPUT} -w \"%%{http_code}\" http://localhost:5000/persons", returnStdout: true).trim()
+                                    
+                                    if (statusCode == '200') {
+                                        echo 'Backend API is healthy!'
+                                        ready = true
+                                        break
+                                    }
+                                } catch (Exception e) {
+                                    echo "Attempt ${i}/${maxAttempts}: Backend not ready (Status: ${e.message})"
+                                }
+                                sleep 5
+                            }
+                            
+                            if (!ready) error "Backend API failed to respond"
+                        }
+                    }
+                }
+                
+                stage('Frontend Health') {
+                    steps {
+                        echo 'Checking frontend application...'
+                        script {
+                            def maxAttempts = 20
+                            def ready = false
+                            
+                            for (int i = 1; i <= maxAttempts; i++) {
+                                try {
+                                    def statusCode = isUnix() ?
+                                        sh(script: "curl -s -o ${env.NULL_OUTPUT} -w \"%{http_code}\" http://localhost:5173", returnStdout: true).trim() :
+                                        bat(script: "curl -s -o ${env.NULL_OUTPUT} -w \"%%{http_code}\" http://localhost:5173", returnStdout: true).trim()
+                                    
+                                    if (statusCode == '200') {
+                                        echo 'Frontend is healthy!'
+                                        ready = true
+                                        break
+                                    }
+                                } catch (Exception e) {
+                                    echo "Attempt ${i}/${maxAttempts}: Frontend not ready"
+                                }
+                                sleep 5
+                            }
+                            
+                            if (!ready) error "Frontend failed to respond"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Run Tests') {
+            when {
+                expression { params.RUN_TESTS == true }
+            }
+            steps {
+                echo 'Running relationship tests...'
+                script {
+                    // Test One-to-One: Person & Passport
+                    echo 'Testing One-to-One Relationship (Person & Passport)...'
+                    try {
+                        def createPerson = isUnix() ?
+                            sh(script: '''curl -X POST http://localhost:5000/persons \
+                                -H "Content-Type: application/json" \
+                                -d '{"name":"Jenkins Test Person"}' ''', returnStdout: true) :
+                            bat(script: '''curl -X POST http://localhost:5000/persons \
+                                -H "Content-Type: application/json" \
+                                -d "{\\"name\\":\\"Jenkins Test Person\\"}" ''', returnStdout: true)
+                        echo "Create Person: ${createPerson}"
+                        
+                        // Test One-to-Many: Customer & Orders
+                        echo 'Testing One-to-Many Relationship (Customer & Orders)...'
+                        def createCustomer = isUnix() ?
+                            sh(script: '''curl -X POST http://localhost:5000/customers \
+                                -H "Content-Type: application/json" \
+                                -d '{"name":"Jenkins Customer"}' ''', returnStdout: true) :
+                            bat(script: '''curl -X POST http://localhost:5000/customers \
+                                -H "Content-Type: application/json" \
+                                -d "{\\"name\\":\\"Jenkins Customer\\"}" ''', returnStdout: true)
+                        echo "Create Customer: ${createCustomer}"
+                        
+                        // Test Many-to-Many: Actors & Movies
+                        echo 'Testing Many-to-Many Relationship (Actors & Movies)...'
+                        def createActor = isUnix() ?
+                            sh(script: '''curl -X POST http://localhost:5000/actors \
+                                -H "Content-Type: application/json" \
+                                -d '{"name":"Jenkins Actor"}' ''', returnStdout: true) :
+                            bat(script: '''curl -X POST http://localhost:5000/actors \
+                                -H "Content-Type: application/json" \
+                                -d "{\\"name\\":\\"Jenkins Actor\\"}" ''', returnStdout: true)
+                        echo "Create Actor: ${createActor}"
+                        
+                    } catch (Exception e) {
+                        echo "Test failed: ${e.message}"
+                        error "Relationship tests failed"
+                    }
+                }
+            }
+        }
+
+        stage('Container Diagnostics') {
+            steps {
+                echo '========================================='
+                echo 'Container Status'
+                echo '========================================='
+                script {
+                    if (isUnix()) {
+                        sh "${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} ps"
+                        sh 'docker stats --no-stream'
+                    } else {
+                        bat "${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} ps"
+                        bat 'docker stats --no-stream'
+                    }
                 }
             }
         }
@@ -143,25 +363,81 @@ pipeline {
     post {
         success {
             echo '========================================='
-            echo 'PIPELINE SUCCESSFUL - Assignment 27'
+            echo '✅ PIPELINE SUCCESSFUL - Assignment 27'
             echo '========================================='
-            echo 'Application is now running:'
+            echo 'Deployment Information:'
+            echo "  • Environment: ${params.DEPLOY_ENV}"
+            echo "  • Git Commit: ${env.GIT_COMMIT}"
+            echo "  • Git Branch: ${env.GIT_BRANCH}"
+            echo ''
+            echo 'Application URLs:'
             echo '  • Frontend: http://localhost:5173'
             echo '  • Backend API: http://localhost:5000'
             echo '  • MongoDB: mongodb://localhost:27017'
-            echo '  • Jenkins: http://localhost:8080'
+            echo '  • API Documentation: http://localhost:5000/api-docs'
+            echo ''
+            echo 'Useful Commands:'
+            echo '  • View logs: docker-compose -p assignment27 logs -f'
+            echo '  • Stop all: docker-compose -p assignment27 down'
+            echo '  • Rebuild: docker-compose -p assignment27 up -d --build'
             echo '========================================='
+            
+            // Archive container logs
+            script {
+                if (isUnix()) {
+                    sh 'docker-compose -p assignment27 logs > assignment27-logs.txt || true'
+                } else {
+                    bat 'docker-compose -p assignment27 logs > assignment27-logs.txt || exit 0'
+                }
+                archiveArtifacts artifacts: '*.txt', allowEmptyArchive: true
+            }
         }
+        
         failure {
             echo '========================================='
             echo 'PIPELINE FAILED - Assignment 27'
             echo '========================================='
             echo 'Collecting debug information...'
-            bat 'docker-compose -p assignment27 logs --tail=100'
+            
+            script {
+                echo 'Container Status:'
+                if (isUnix()) {
+                    sh "${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} ps"
+                    sh "${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} logs --tail=100"
+                } else {
+                    bat "${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} ps"
+                    bat "${env.DOCKER_COMPOSE_CMD} -p ${env.COMPOSE_PROJECT_NAME} logs --tail=100"
+                }
+            }
+            
+            echo '========================================='
+            echo 'Troubleshooting Tips:'
+            echo '1. Check if ports 5000, 5173, 27017 are available'
+            echo '2. Verify Docker daemon is running'
+            echo '3. Check Docker Compose file syntax'
+            echo '4. Review backend/frontend Dockerfiles'
+            echo '5. Ensure all required files exist'
             echo '========================================='
         }
+        
+        unstable {
+            echo 'PIPELINE UNSTABLE - Some tests failed but deployment succeeded'
+        }
+        
         always {
-            echo 'Pipeline execution completed for Assignment 27'
+            echo '========================================='
+            echo "Pipeline completed at: ${new Date()}"
+            echo "Total duration: ${currentBuild.durationString}"
+            echo '========================================='
+            
+            // Cleanup old images (keep last 5)
+            script {
+                if (isUnix()) {
+                    sh 'docker image prune -f --filter "until=24h" || true'
+                } else {
+                    bat 'docker image prune -f --filter "until=24h" || exit 0'
+                }
+            }
         }
     }
 }
