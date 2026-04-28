@@ -70,4 +70,28 @@ router.get('/:authorId/books', async (req, res) => {
     }
 });
 
+// Delete specific book from author
+router.delete('/:authorId/books/:bookId', async (req, res) => {
+    try {
+        const { authorId, bookId } = req.params;
+
+        const author = await Author.findById(authorId);
+        if (!author) {
+            return res.status(404).json({ error: 'Author not found' });
+        }
+
+        const bookIndex = author.books.findIndex(book => book._id.toString() === bookId);
+        if (bookIndex === -1) {
+            return res.status(404).json({ error: 'Book not found' });
+        }
+
+        author.books.splice(bookIndex, 1);
+        await author.save();
+
+        res.json({ message: 'Book deleted successfully', author });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+});
+
 module.exports = router;

@@ -189,6 +189,27 @@ function App() {
     }
   };
 
+  const handleDeleteBook = async (authorId, bookId) => {
+    if (
+      !window.confirm(
+        "Are you sure you want to delete this book? This action cannot be undone.",
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await axios.delete(
+        `http://localhost:5000/authors/${authorId}/books/${bookId}`,
+      );
+      await fetchAuthors();
+      alert("Book deleted successfully");
+    } catch (error) {
+      console.error("Error deleting book:", error);
+      alert("Failed to delete book");
+    }
+  };
+
   // Many-to-Many: Actors & Movies
   const fetchActors = async () => {
     try {
@@ -466,7 +487,15 @@ function App() {
                 <ul style={styles.list}>
                   {author.books && author.books.length > 0 ? (
                     author.books.map((book) => (
-                      <li key={book._id}>{book.title}</li>
+                      <li key={book._id} style={styles.orderItem}>
+                        <span>{book.title}</span>
+                        <button
+                          onClick={() => handleDeleteBook(author._id, book._id)}
+                          style={styles.deleteButton}
+                        >
+                          Delete Book
+                        </button>
+                      </li>
                     ))
                   ) : (
                     <li>No books yet</li>
